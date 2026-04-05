@@ -24,7 +24,7 @@ class Settings(BaseSettings):
     suspect_threshold: float = 0.50
 
     # CORS
-    cors_origins: str = "http://localhost:5173,http://localhost:3000"
+    cors_origins: str = "*"
 
     # Captures
     capture_dir: str = "./captures"
