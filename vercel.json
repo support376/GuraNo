@@ -1,0 +1,9 @@
+{
+  "buildCommand": "cd frontend && npm install && npm run build",
+  "outputDirectory": "frontend/dist",
+  "installCommand": "echo skip",
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://gurano-backend.onrender.com/api/:path*" },
+    { "source": "/captures/:path*", "destination": "https://gurano-backend.onrender.com/captures/:path*" }
+  ]
+}

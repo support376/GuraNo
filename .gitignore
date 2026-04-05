@@ -46,3 +46,5 @@ captures/
 watch-app/*.xcodeproj/xcuserdata/
 watch-app/build/
 DerivedData/
+
+.vercel
