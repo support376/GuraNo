@@ -1,7 +1,6 @@
 """Noise filtering for audio using simple spectral gating as MVP fallback."""
 import logging
 import numpy as np
-from scipy.signal import butter, filtfilt
 
 logger = logging.getLogger(__name__)
 
@@ -9,18 +8,14 @@ SAMPLE_RATE = 16000
 
 
 def apply_noise_reduction(audio: np.ndarray, sr: int = SAMPLE_RATE) -> np.ndarray:
-    """Apply basic noise reduction via bandpass filter (300Hz - 3400Hz for speech)."""
+    """Simple noise reduction by zeroing low-energy frames."""
     if len(audio) < 100:
         return audio
-
-    nyq = sr / 2.0
-    low = 300.0 / nyq
-    high = min(3400.0 / nyq, 0.99)
-
     try:
-        b, a = butter(4, [low, high], btype='band')
-        filtered = filtfilt(b, a, audio.astype(np.float64))
-        return filtered.astype(audio.dtype)
+        energy = np.abs(audio.astype(np.float64))
+        threshold = np.mean(energy) * 0.3
+        mask = energy > threshold
+        return (audio * mask).astype(audio.dtype)
     except Exception as e:
         logger.warning(f"Noise filter failed: {e}")
         return audio
