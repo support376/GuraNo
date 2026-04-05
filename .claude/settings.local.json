@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(docker --version)",
+      "Bash(docker-compose --version)",
+      "Bash(pip --version)",
+      "Bash(mkdir -p captures)",
+      "Bash(npm install:*)",
+      "Bash(pip install:*)",
+      "Bash(python:*)",
+      "Bash(curl -s http://localhost:8000/docs)",
+      "Bash(npm run:*)",
+      "Bash(curl -s http://localhost:8000/api/sessions)",
+      "Bash(curl -s http://localhost:5173)",
+      "Bash(gh --version)",
+      "Bash(vercel --version)",
+      "Bash(git --version)"
+    ]
+  }
+}

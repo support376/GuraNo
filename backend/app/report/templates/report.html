@@ -1,0 +1,147 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>GuraNo 분석 보고서</title>
+<style>
+  body {
+    font-family: 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    margin: 0;
+    padding: 20px;
+    max-width: 800px;
+    margin: 0 auto;
+  }
+  h1 { color: #60a5fa; text-align: center; }
+  h2 { color: #94a3b8; border-bottom: 1px solid #334155; padding-bottom: 8px; }
+  .score-box {
+    text-align: center;
+    padding: 30px;
+    background: #1e293b;
+    border-radius: 12px;
+    margin: 20px 0;
+  }
+  .score-value {
+    font-size: 64px;
+    font-weight: bold;
+  }
+  .truth { color: #22c55e; }
+  .suspect { color: #eab308; }
+  .lie { color: #ef4444; }
+  .question-card {
+    background: #1e293b;
+    border-radius: 8px;
+    padding: 16px;
+    margin: 12px 0;
+    border-left: 4px solid;
+  }
+  .question-card.verdict-진실 { border-color: #22c55e; }
+  .question-card.verdict-의심 { border-color: #eab308; }
+  .question-card.verdict-거짓 { border-color: #ef4444; }
+  .reasons { font-size: 12px; color: #94a3b8; margin-top: 8px; }
+  .reasons li { margin: 4px 0; }
+  .meta { font-size: 12px; color: #64748b; }
+  .gauge-row {
+    display: flex;
+    justify-content: space-around;
+    margin: 20px 0;
+  }
+  .gauge {
+    text-align: center;
+    padding: 16px;
+    background: #1e293b;
+    border-radius: 8px;
+    min-width: 120px;
+  }
+  .gauge-value { font-size: 24px; font-weight: bold; }
+  .gauge-label { font-size: 12px; color: #94a3b8; }
+  .screenshot { max-width: 200px; border-radius: 8px; margin-top: 8px; }
+  .footer { text-align: center; margin-top: 40px; font-size: 11px; color: #475569; }
+</style>
+</head>
+<body>
+
+<h1>GuraNo 분석 보고서</h1>
+<p class="meta" style="text-align:center">{{ created_at }}</p>
+
+<div class="score-box">
+  <p style="font-size: 14px; color: #94a3b8;">종합 진실성 점수</p>
+  <p class="score-value {% if truth_score >= 70 %}truth{% elif truth_score >= 50 %}suspect{% else %}lie{% endif %}">
+    {{ "%.0f"|format(truth_score) }}%
+  </p>
+</div>
+
+<div class="gauge-row">
+  <div class="gauge">
+    <div class="gauge-value lie">{{ lie_count }}</div>
+    <div class="gauge-label">거짓</div>
+  </div>
+  <div class="gauge">
+    <div class="gauge-value suspect">{{ suspect_count }}</div>
+    <div class="gauge-label">의심</div>
+  </div>
+  <div class="gauge">
+    <div class="gauge-value truth">{{ truth_count }}</div>
+    <div class="gauge-label">진실</div>
+  </div>
+</div>
+
+{% if hr_chart_path %}
+<h2>심박수 변화</h2>
+<img src="{{ hr_chart_path }}" style="width: 100%; border-radius: 8px;">
+{% endif %}
+
+{% if hr_peak_bpm %}
+<p class="meta">최고: {{ "%.0f"|format(hr_peak_bpm) }} BPM ({{ hr_peak_question }}) | 최저: {{ "%.0f"|format(hr_lowest_bpm) }} BPM ({{ hr_lowest_question }})</p>
+{% endif %}
+
+<h2>질문별 분석</h2>
+
+{% for q in question_results %}
+<div class="question-card verdict-{{ q.verdict }}">
+  <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
+    <strong>Q{{ q.question_number }}: {{ q.question_text }}</strong>
+    <span class="{% if q.verdict == '거짓' %}lie{% elif q.verdict == '의심' %}suspect{% else %}truth{% endif %}">
+      {{ q.verdict }} ({{ "%.0f"|format(q.confidence * 100) }}%)
+    </span>
+  </div>
+
+  {% if q.answer_text %}
+  <p>A: "{{ q.answer_text }}"</p>
+  {% endif %}
+
+  {% if q.hr_bpm %}
+  <p class="meta">심박수: {{ "%.0f"|format(q.hr_bpm) }} BPM
+    {% if baseline_hr %}
+      (기준선 {{ "%+.0f"|format(q.hr_bpm - baseline_hr) }})
+    {% endif %}
+  </p>
+  {% endif %}
+
+  <p class="meta">
+    음성: {{ "%.0f"|format(q.voice_score * 100) }}% |
+    표정: {{ "%.0f"|format(q.face_score * 100) }}% |
+    심박: {{ "%.0f"|format(q.hr_score * 100) }}%
+  </p>
+
+  {% if q.reasons %}
+  <ul class="reasons">
+    {% for r in q.reasons %}
+    <li>{{ r }}</li>
+    {% endfor %}
+  </ul>
+  {% endif %}
+
+  {% if q.screenshot_path %}
+  <img src="{{ q.screenshot_path }}" class="screenshot">
+  {% endif %}
+</div>
+{% endfor %}
+
+<div class="footer">
+  <p>GuraNo AI 거짓말 탐지기 | 본 결과는 참고용이며, 법적 판단의 근거로 사용할 수 없습니다.</p>
+</div>
+
+</body>
+</html>

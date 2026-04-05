@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+env/
+*.pkl
+*.joblib
+
+# Node
+node_modules/
+frontend/dist/
+.vite/
+
+# Environment
+.env
+*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Data & Models
+backend/data/raw/*
+backend/ml/saved_models/*.pkl
+!backend/ml/saved_models/.gitkeep
+
+# Captures
+captures/
+*.mp4
+*.wav
+
+# Docker
+.docker/
+
+# Swift
+watch-app/*.xcodeproj/xcuserdata/
+watch-app/build/
+DerivedData/
