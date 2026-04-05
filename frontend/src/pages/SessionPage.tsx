@@ -5,7 +5,6 @@ import { useResultStore } from '@/stores/resultStore';
 import { useCamera } from '@/hooks/useCamera';
 import { useMicrophone } from '@/hooks/useMicrophone';
 import { useWebSocket } from '@/hooks/useWebSocket';
-import { useTTS } from '@/hooks/useTTS';
 import type { WSMessage } from '@/types/websocket';
 import type { AnalysisResult, LieDetection } from '@/types/analysis';
 
@@ -16,11 +15,11 @@ export default function SessionPage() {
   const latestResult = useResultStore((s) => s.latestResult);
   const lieDetections = useResultStore((s) => s.lieDetections);
   const camera = useCamera();
-  const tts = useTTS();
   const [elapsed, setElapsed] = useState(0);
   const [showLieAlert, setShowLieAlert] = useState<LieDetection | null>(null);
   const [started, setStarted] = useState(false);
   const [answerTimer, setAnswerTimer] = useState(0);
+  const [speaking, setSpeaking] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
   const answerTimerRef = useRef<ReturnType<typeof setInterval>>();
 
@@ -67,7 +66,6 @@ export default function SessionPage() {
     if (!started && camera.active && questions.length > 0) {
       setStarted(true);
       if (connected) send({ type: 'session_start' });
-      // 첫 질문 자동 읽기
       askQuestion(0);
     }
   }, [camera.active, questions, started, connected]);
@@ -80,9 +78,32 @@ export default function SessionPage() {
       if (frame) {
         send({ type: 'video_frame', data: frame, ts: Date.now() / 1000 });
       }
-    }, 33); // 30fps
+    }, 33);
     return () => clearInterval(interval);
   }, [camera.active, connected, send, camera.captureFrame]);
+
+  const speakText = (text: string, onDone: () => void) => {
+    setSpeaking(true);
+    try {
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = 'ko-KR';
+      utterance.rate = 0.9;
+      utterance.onend = () => { setSpeaking(false); onDone(); };
+      utterance.onerror = () => { setSpeaking(false); onDone(); };
+      window.speechSynthesis.speak(utterance);
+      // 안전장치: 5초 안에 안 끝나면 강제 진행
+      setTimeout(() => {
+        if (speaking) {
+          setSpeaking(false);
+          onDone();
+        }
+      }, 5000);
+    } catch {
+      setSpeaking(false);
+      onDone();
+    }
+  };
 
   const askQuestion = (idx: number) => {
     if (idx >= questions.length) {
@@ -91,9 +112,7 @@ export default function SessionPage() {
     }
     setCurrentIndex(idx);
     const q = questions[idx];
-    // TTS로 질문 읽기
-    tts.speak(q.text, () => {
-      // 질문 읽기 끝나면 답변 대기 타이머 시작 (5초)
+    speakText(q.text, () => {
       startAnswerTimer();
     });
   };
@@ -107,7 +126,6 @@ export default function SessionPage() {
       setAnswerTimer(t);
       if (t <= 0) {
         clearInterval(answerTimerRef.current!);
-        // 자동으로 다음 질문
         handleNextQuestion();
       }
     }, 1000);
@@ -116,6 +134,7 @@ export default function SessionPage() {
   const handleNextQuestion = () => {
     if (answerTimerRef.current) clearInterval(answerTimerRef.current);
     setAnswerTimer(0);
+    window.speechSynthesis.cancel();
     if (connected) send({ type: 'next_question' });
     const nextIdx = currentIndex + 1;
     if (nextIdx >= questions.length) {
@@ -128,11 +147,12 @@ export default function SessionPage() {
   const handleStop = () => {
     if (answerTimerRef.current) clearInterval(answerTimerRef.current);
     if (timerRef.current) clearInterval(timerRef.current);
-    tts.stop();
+    window.speechSynthesis.cancel();
     camera.stop();
     mic.stop();
     if (connected) send({ type: 'session_stop' });
-    setPhase('report');
+    // 보고서 생성 대기 후 이동
+    setTimeout(() => setPhase('report'), 1500);
   };
 
   const formatTime = (s: number) => {
@@ -167,12 +187,11 @@ export default function SessionPage() {
         </span>
       </div>
 
-      {/* Main Content - responsive */}
+      {/* Main Content */}
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Video */}
         <div className="md:w-1/2 relative bg-black min-h-[200px]">
           <video ref={camera.videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-          {/* Lie Alert Overlay */}
           {showLieAlert && (
             <div className="absolute inset-0 bg-red-600/30 flex items-center justify-center animate-pulse">
               <div className="bg-red-900/90 rounded-xl p-4 text-center max-w-sm">
@@ -187,10 +206,11 @@ export default function SessionPage() {
         <div className="md:w-1/2 flex flex-col p-4 gap-3 overflow-y-auto">
           {/* Current Question */}
           <div className="bg-slate-800 rounded-xl p-4">
-            <p className="text-xs text-slate-500 mb-1">현재 질문</p>
+            <p className="text-xs text-slate-500 mb-1">
+              현재 질문 {speaking && <span className="text-blue-400 ml-1">읽는 중...</span>}
+            </p>
             <p className="text-lg font-medium">{currentQ?.text ?? '대기 중...'}</p>
 
-            {/* Answer timer */}
             {answerTimer > 0 && (
               <div className="mt-2">
                 <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
@@ -253,7 +273,7 @@ export default function SessionPage() {
               </div>
             )}
             {!latestResult && (
-              <p className="text-xs text-slate-500 text-center mt-2">분석 대기 중...</p>
+              <p className="text-xs text-slate-500 text-center mt-2">서버 연결 대기 중...</p>
             )}
           </div>
 
@@ -267,7 +287,6 @@ export default function SessionPage() {
             </div>
           </div>
 
-          {/* Lie Detections Log */}
           {lieDetections.length > 0 && (
             <div className="bg-slate-800 rounded-xl p-4 max-h-32 overflow-y-auto">
               <p className="text-xs text-slate-500 mb-2">거짓 감지 기록</p>
