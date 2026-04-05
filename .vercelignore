@@ -1,0 +1,6 @@
+backend/
+watch-app/
+scripts/
+docs/
+*.md
+docker-compose.yml
