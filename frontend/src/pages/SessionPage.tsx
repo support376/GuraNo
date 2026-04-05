@@ -19,7 +19,10 @@ export default function SessionPage() {
   const tts = useTTS();
   const [elapsed, setElapsed] = useState(0);
   const [showLieAlert, setShowLieAlert] = useState<LieDetection | null>(null);
+  const [started, setStarted] = useState(false);
+  const [answerTimer, setAnswerTimer] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const answerTimerRef = useRef<ReturnType<typeof setInterval>>();
 
   const handleWS = useCallback((msg: WSMessage) => {
     if (msg.type === 'analysis_result') {
@@ -33,17 +36,10 @@ export default function SessionPage() {
       addLieDetection(d);
       setShowLieAlert(d);
       setTimeout(() => setShowLieAlert(null), 4000);
-    } else if (msg.type === 'tts_play') {
-      const text = msg.text as string;
-      const idx = msg.question_index as number;
-      setCurrentIndex(idx);
-      tts.speak(text, () => {
-        // After TTS finishes, wait for answer
-      });
     } else if (msg.type === 'session_complete') {
       setPhase('report');
     }
-  }, [setLatestResult, addLieDetection, addHRReading, setCurrentIndex, tts, setPhase]);
+  }, [setLatestResult, addLieDetection, addHRReading, setPhase]);
 
   const { send, connected } = useWebSocket(session?.id ?? null, handleWS);
 
@@ -53,20 +49,30 @@ export default function SessionPage() {
 
   const mic = useMicrophone(handleAudioChunk);
 
-  // Start everything
+  // 카메라 + 마이크 시작
   useEffect(() => {
-    if (connected) {
-      camera.start();
-      mic.start();
-      send({ type: 'session_start' });
-      timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
-    }
+    camera.start();
+    mic.start();
+    timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
+      if (answerTimerRef.current) clearInterval(answerTimerRef.current);
+      camera.stop();
+      mic.stop();
     };
-  }, [connected]);
+  }, []);
 
-  // Send video frames at 30fps
+  // 세션 시작 + 첫 질문
+  useEffect(() => {
+    if (!started && camera.active && questions.length > 0) {
+      setStarted(true);
+      if (connected) send({ type: 'session_start' });
+      // 첫 질문 자동 읽기
+      askQuestion(0);
+    }
+  }, [camera.active, questions, started, connected]);
+
+  // 비디오 프레임 전송
   useEffect(() => {
     if (!camera.active || !connected) return;
     const interval = setInterval(() => {
@@ -74,16 +80,59 @@ export default function SessionPage() {
       if (frame) {
         send({ type: 'video_frame', data: frame, ts: Date.now() / 1000 });
       }
-    }, 33);
+    }, 33); // 30fps
     return () => clearInterval(interval);
   }, [camera.active, connected, send, camera.captureFrame]);
 
+  const askQuestion = (idx: number) => {
+    if (idx >= questions.length) {
+      handleStop();
+      return;
+    }
+    setCurrentIndex(idx);
+    const q = questions[idx];
+    // TTS로 질문 읽기
+    tts.speak(q.text, () => {
+      // 질문 읽기 끝나면 답변 대기 타이머 시작 (12초)
+      startAnswerTimer();
+    });
+  };
+
+  const startAnswerTimer = () => {
+    if (answerTimerRef.current) clearInterval(answerTimerRef.current);
+    let t = 12;
+    setAnswerTimer(t);
+    answerTimerRef.current = setInterval(() => {
+      t -= 1;
+      setAnswerTimer(t);
+      if (t <= 0) {
+        clearInterval(answerTimerRef.current!);
+        // 자동으로 다음 질문
+        handleNextQuestion();
+      }
+    }, 1000);
+  };
+
   const handleNextQuestion = () => {
-    send({ type: 'next_question' });
+    if (answerTimerRef.current) clearInterval(answerTimerRef.current);
+    setAnswerTimer(0);
+    if (connected) send({ type: 'next_question' });
+    const nextIdx = currentIndex + 1;
+    if (nextIdx >= questions.length) {
+      handleStop();
+    } else {
+      askQuestion(nextIdx);
+    }
   };
 
   const handleStop = () => {
-    send({ type: 'session_stop' });
+    if (answerTimerRef.current) clearInterval(answerTimerRef.current);
+    if (timerRef.current) clearInterval(timerRef.current);
+    tts.stop();
+    camera.stop();
+    mic.stop();
+    if (connected) send({ type: 'session_stop' });
+    setPhase('report');
   };
 
   const formatTime = (s: number) => {
@@ -109,7 +158,7 @@ export default function SessionPage() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* Top Bar */}
-      <div className="bg-slate-800 px-4 py-2 flex items-center justify-between text-sm">
+      <div className="bg-slate-800 px-4 py-2 flex items-center justify-between text-sm flex-shrink-0">
         <span className="font-semibold">GuraNo</span>
         <span>Q{currentIndex + 1}/{questions.length}</span>
         <span>{formatTime(elapsed)}</span>
@@ -119,9 +168,9 @@ export default function SessionPage() {
       </div>
 
       {/* Main Content - responsive */}
-      <div className="flex-1 flex flex-col md:flex-row">
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Video */}
-        <div className="md:w-1/2 relative bg-black">
+        <div className="md:w-1/2 relative bg-black min-h-[200px]">
           <video ref={camera.videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
           {/* Lie Alert Overlay */}
           {showLieAlert && (
@@ -135,11 +184,25 @@ export default function SessionPage() {
         </div>
 
         {/* Right Panel */}
-        <div className="md:w-1/2 flex flex-col p-4 gap-4">
+        <div className="md:w-1/2 flex flex-col p-4 gap-3 overflow-y-auto">
           {/* Current Question */}
           <div className="bg-slate-800 rounded-xl p-4">
             <p className="text-xs text-slate-500 mb-1">현재 질문</p>
             <p className="text-lg font-medium">{currentQ?.text ?? '대기 중...'}</p>
+
+            {/* Answer timer */}
+            {answerTimer > 0 && (
+              <div className="mt-2">
+                <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-blue-500 transition-all duration-1000"
+                    style={{ width: `${(answerTimer / 12) * 100}%` }}
+                  />
+                </div>
+                <p className="text-xs text-slate-400 mt-1">답변 시간: {answerTimer}초</p>
+              </div>
+            )}
+
             <div className="flex gap-2 mt-3">
               <button
                 onClick={handleNextQuestion}
@@ -176,7 +239,7 @@ export default function SessionPage() {
                   <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
                     <div
                       className={`h-full ${getBarColor(score)} transition-all duration-300`}
-                      style={{ width: `${score * 100}%` }}
+                      style={{ width: `${Math.max(score * 100, 1)}%` }}
                     />
                   </div>
                 </div>
@@ -189,6 +252,9 @@ export default function SessionPage() {
                 </span>
               </div>
             )}
+            {!latestResult && (
+              <p className="text-xs text-slate-500 text-center mt-2">분석 대기 중...</p>
+            )}
           </div>
 
           {/* HR */}
@@ -199,21 +265,11 @@ export default function SessionPage() {
                 {latestResult?.current_hr?.toFixed(0) ?? '--'} <span className="text-sm">BPM</span>
               </span>
             </div>
-            {latestResult?.baseline_hr && (
-              <p className="text-xs text-slate-500 mt-1">
-                기준선: {latestResult.baseline_hr.toFixed(0)} BPM
-                {latestResult.current_hr > 0 && (
-                  <span className={latestResult.current_hr > latestResult.baseline_hr + 5 ? 'text-red-400' : 'text-green-400'}>
-                    {' '}({latestResult.current_hr > latestResult.baseline_hr ? '+' : ''}{(latestResult.current_hr - latestResult.baseline_hr).toFixed(0)})
-                  </span>
-                )}
-              </p>
-            )}
           </div>
 
           {/* Lie Detections Log */}
           {lieDetections.length > 0 && (
-            <div className="bg-slate-800 rounded-xl p-4 max-h-40 overflow-y-auto">
+            <div className="bg-slate-800 rounded-xl p-4 max-h-32 overflow-y-auto">
               <p className="text-xs text-slate-500 mb-2">거짓 감지 기록</p>
               {lieDetections.map((d, i) => (
                 <div key={i} className="text-sm text-red-300 mb-1">

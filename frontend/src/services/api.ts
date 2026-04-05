@@ -3,8 +3,10 @@ import type { Session } from '@/types/session';
 import type { Question } from '@/types/question';
 import type { ReportData } from '@/types/analysis';
 
+const API_BASE = import.meta.env.VITE_API_URL || '';
+
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: `${API_BASE}/api`,
 });
 
 export const sessionApi = {

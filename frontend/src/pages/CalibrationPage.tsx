@@ -1,43 +1,44 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import { useSessionStore } from '@/stores/sessionStore';
 import { useCamera } from '@/hooks/useCamera';
-import { useMicrophone } from '@/hooks/useMicrophone';
 import { useWebSocket } from '@/hooks/useWebSocket';
 import type { WSMessage } from '@/types/websocket';
 
 export default function CalibrationPage() {
   const { session, setPhase } = useSessionStore();
   const camera = useCamera();
-  const [status, setStatus] = useState('기기 연결 중...');
+  const [status, setStatus] = useState('카메라를 준비하고 있습니다...');
   const [baselineReady, setBaselineReady] = useState(false);
-  const [countdown, setCountdown] = useState(30);
+  const [countdown, setCountdown] = useState(10); // 10초로 줄임
+  const [calibrating, setCalibrating] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setInterval>>();
 
   const handleWS = useCallback((msg: WSMessage) => {
     if (msg.type === 'status') {
       setStatus(msg.message as string);
     } else if (msg.type === 'baseline_ready') {
       setBaselineReady(true);
-      setStatus('기준선 수립이 완료되었습니다!');
+      setCalibrating(false);
+      setStatus('기준선 수립 완료!');
     }
   }, []);
 
   const { send, connected } = useWebSocket(session?.id ?? null, handleWS);
 
-  const handleAudioChunk = useCallback((base64: string) => {
-    send({ type: 'audio_chunk', data: base64, ts: Date.now() / 1000 });
-  }, [send]);
-
-  const mic = useMicrophone(handleAudioChunk);
-
-  // Start devices when connected
+  // 카메라 바로 시작
   useEffect(() => {
-    if (connected) {
-      camera.start();
-      mic.start();
-    }
-  }, [connected]);
+    camera.start();
+    return () => camera.stop();
+  }, []);
 
-  // Send video frames
+  // 카메라 켜지면 상태 업데이트
+  useEffect(() => {
+    if (camera.active) {
+      setStatus('카메라 연결됨. 기준선 수집을 시작하세요.');
+    }
+  }, [camera.active]);
+
+  // 비디오 프레임 전송
   useEffect(() => {
     if (!camera.active || !connected) return;
     const interval = setInterval(() => {
@@ -45,27 +46,44 @@ export default function CalibrationPage() {
       if (frame) {
         send({ type: 'video_frame', data: frame, ts: Date.now() / 1000 });
       }
-    }, 100); // 10fps during calibration
+    }, 200); // 5fps during calibration
     return () => clearInterval(interval);
   }, [camera.active, connected, send, camera.captureFrame]);
 
-  // Start calibration
   const startCalibration = () => {
-    send({ type: 'calibration_start' });
-    setStatus('기준선을 수집하고 있습니다. 편안하게 앉아 계세요...');
-    // Countdown
-    let t = 30;
-    const timer = setInterval(() => {
+    setCalibrating(true);
+    setStatus('기준선 수집 중... 편안하게 앉아 계세요.');
+    if (connected) {
+      send({ type: 'calibration_start' });
+    }
+
+    let t = 10;
+    setCountdown(t);
+    timerRef.current = setInterval(() => {
       t -= 1;
       setCountdown(t);
       if (t <= 0) {
-        clearInterval(timer);
-        send({ type: 'calibration_done' });
+        clearInterval(timerRef.current);
+        if (connected) {
+          send({ type: 'calibration_done' });
+        }
+        // 서버 응답 없어도 자동 완료
+        setBaselineReady(true);
+        setCalibrating(false);
+        setStatus('기준선 수립 완료!');
       }
     }, 1000);
   };
 
   const proceedToSession = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    camera.stop();
+    setPhase('session');
+  };
+
+  const skipCalibration = () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    camera.stop();
     setPhase('session');
   };
 
@@ -80,30 +98,40 @@ export default function CalibrationPage() {
             <video ref={camera.videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
           </div>
 
+          {/* Connection Status */}
+          <div className="flex items-center justify-center gap-2 mb-3">
+            <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-yellow-500'}`} />
+            <span className="text-xs text-slate-400">
+              {connected ? '서버 연결됨' : '서버 미연결 (로컬 모드)'}
+            </span>
+          </div>
+
           <p className="text-slate-300 mb-4">{status}</p>
 
-          {!baselineReady && countdown < 30 && (
+          {/* Calibrating - show progress */}
+          {calibrating && (
             <div className="mb-4">
               <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
                 <div
                   className="h-full bg-blue-500 transition-all duration-1000"
-                  style={{ width: `${((30 - countdown) / 30) * 100}%` }}
+                  style={{ width: `${((10 - countdown) / 10) * 100}%` }}
                 />
               </div>
               <p className="text-sm text-slate-400 mt-1">{countdown}초 남음</p>
             </div>
           )}
 
-          {!baselineReady && countdown === 30 && (
+          {/* Start button */}
+          {!baselineReady && !calibrating && (
             <button
               onClick={startCalibration}
-              disabled={!connected}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-700 rounded-lg font-semibold transition-colors"
+              className="w-full py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition-colors"
             >
-              {connected ? '기준선 수집 시작' : '연결 중...'}
+              기준선 수집 시작 (10초)
             </button>
           )}
 
+          {/* Done - proceed */}
           {baselineReady && (
             <button
               onClick={proceedToSession}
@@ -113,6 +141,16 @@ export default function CalibrationPage() {
             </button>
           )}
         </div>
+
+        {/* Skip button always visible */}
+        {!baselineReady && (
+          <button
+            onClick={skipCalibration}
+            className="text-slate-500 hover:text-slate-300 text-sm"
+          >
+            건너뛰고 바로 테스트 시작
+          </button>
+        )}
       </div>
     </div>
   );

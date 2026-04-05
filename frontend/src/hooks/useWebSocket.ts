@@ -9,9 +9,15 @@ export function useWebSocket(sessionId: string | null, onMessage: MessageHandler
 
   const connect = useCallback(() => {
     if (!sessionId) return;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const host = window.location.host;
-    const url = `${protocol}//${host}/ws/${sessionId}`;
+    const wsBase = import.meta.env.VITE_WS_URL;
+    let url: string;
+    if (wsBase) {
+      url = `${wsBase}/ws/${sessionId}`;
+    } else {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = window.location.host;
+      url = `${protocol}//${host}/ws/${sessionId}`;
+    }
 
     const ws = new WebSocket(url);
     wsRef.current = ws;

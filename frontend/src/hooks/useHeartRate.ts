@@ -15,7 +15,7 @@ export function useHeartRate() {
   // BLE Heart Rate connection (Web Bluetooth API)
   const connectBLE = useCallback(async () => {
     try {
-      const device = await navigator.bluetooth.requestDevice({
+      const device = await navigator.bluetooth!.requestDevice({
         filters: [{ services: ['heart_rate'] }],
       });
       bleDeviceRef.current = device;
