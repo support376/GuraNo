@@ -16,9 +16,14 @@ class QuestionCreate(BaseModel):
     category: str = "sensitive"
 
 
+class QuestionItem(BaseModel):
+    text: str
+    category: str = "sensitive"
+
+
 class QuestionBulkCreate(BaseModel):
     session_id: str
-    questions: list[dict]  # [{"text": "...", "category": "sensitive"}, ...]
+    questions: list[QuestionItem]
 
 
 class QuestionResponse(BaseModel):
@@ -46,9 +51,9 @@ async def create_questions_bulk(body: QuestionBulkCreate, db: AsyncSession = Dep
     for i, qdata in enumerate(body.questions):
         q = Question(
             session_id=body.session_id,
-            text=qdata["text"],
+            text=qdata.text,
             order=i + 1,
-            category=qdata.get("category", "sensitive"),
+            category=qdata.category,
         )
         db.add(q)
         questions.append(q)

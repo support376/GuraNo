@@ -13,6 +13,7 @@ export default function SetupPage() {
   const [selectedHR, setSelectedHR] = useState<HRSource>('rppg');
   const [cameraReady, setCameraReady] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleCameraTest = async () => {
     await camera.start();
@@ -36,8 +37,9 @@ export default function SetupPage() {
       setQuestions(questions);
       camera.stop();
       setPhase('calibration');
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
+      setError(e?.response?.data?.detail || e?.message || '서버 연결에 실패했습니다. 백엔드가 실행 중인지 확인하세요.');
     } finally {
       setLoading(false);
     }
@@ -106,7 +108,7 @@ export default function SetupPage() {
 
           {/* HR Source */}
           <div className="pt-2">
-            <span className="text-sm text-slate-400">심박수 소���</span>
+            <span className="text-sm text-slate-400">심박수 소스</span>
             <div className="mt-2 space-y-1">
               {([
                 ['apple_watch', 'Apple Watch (권장)'],
@@ -129,6 +131,13 @@ export default function SetupPage() {
           </div>
         </div>
       </div>
+
+      {/* Error */}
+      {error && (
+        <div className="bg-red-900/30 border border-red-500/30 rounded-xl p-3 mb-4 text-sm text-red-300">
+          {error}
+        </div>
+      )}
 
       {/* Start Button */}
       <button

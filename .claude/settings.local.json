@@ -23,7 +23,19 @@
       "Bash(C:/Users/user/AppData/Roaming/npm/gh.cmd auth:*)",
       "Bash(winget install:*)",
       "Bash(export PATH=\"/c/Program Files/GitHub CLI:$PATH\")",
-      "Bash(npx tsc:*)"
+      "Bash(npx tsc:*)",
+      "Read(//c/Program Files/GitHub CLI//**)",
+      "Read(//c/Users/user/.config/gh/**)",
+      "Read(//c/Users/user/AppData/Roaming/**)",
+      "Read(//c/Users/user/AppData/**)",
+      "Read(//c/Users/user/**)",
+      "Bash(/c/Program Files/GitHub CLI/gh.exe auth:*)",
+      "Bash(npx vercel:*)",
+      "Bash(curl:*)",
+      "Bash(pkill -f \"uvicorn app.main\")",
+      "Bash(tasklist)",
+      "Bash(taskkill:*)",
+      "Bash(find /c/Users/user/Desktop/claude/GuraNo/backend -name \"__pycache__\" -type d -exec rm -rf {} +)"
     ]
   }
 }
