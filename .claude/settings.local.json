@@ -39,7 +39,11 @@
       "Bash(git push:*)",
       "Bash(disown)",
       "Bash(ngrok --version)",
-      "Bash(winget list:*)"
+      "Bash(winget list:*)",
+      "Bash(render --version)",
+      "Bash(railway:*)",
+      "Bash(where railway:*)",
+      "Bash(git add:*)"
     ]
   }
 }

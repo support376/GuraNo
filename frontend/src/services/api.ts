@@ -3,7 +3,7 @@ import type { Session } from '@/types/session';
 import type { Question } from '@/types/question';
 import type { ReportData } from '@/types/analysis';
 
-const API_BASE = import.meta.env.VITE_API_URL || '';
+const API_BASE = import.meta.env.VITE_API_URL || 'https://gurano-backend.onrender.com';
 
 const api = axios.create({
   baseURL: `${API_BASE}/api`,
