@@ -5,8 +5,17 @@ import { useResultStore } from '@/stores/resultStore';
 import { useCamera } from '@/hooks/useCamera';
 import { useMicrophone } from '@/hooks/useMicrophone';
 import { useWebSocket } from '@/hooks/useWebSocket';
+import { useSound } from '@/hooks/useSound';
 import type { WSMessage } from '@/types/websocket';
 import type { AnalysisResult, LieDetection } from '@/types/analysis';
+
+// 질문별 판정 결과
+interface QuestionVerdict {
+  questionIdx: number;
+  text: string;
+  verdict: string; // 진실, 의심, 거짓
+  score: number;
+}
 
 export default function SessionPage() {
   const { session, setPhase } = useSessionStore();
@@ -15,30 +24,38 @@ export default function SessionPage() {
   const latestResult = useResultStore((s) => s.latestResult);
   const lieDetections = useResultStore((s) => s.lieDetections);
   const camera = useCamera();
+  const sound = useSound();
+
+  // 단계: ready(카메라 미리보기) → running(테스트 진행) → done
+  const [phase, setLocalPhase] = useState<'ready' | 'running' | 'done'>('ready');
   const [elapsed, setElapsed] = useState(0);
   const [showLieAlert, setShowLieAlert] = useState<LieDetection | null>(null);
-  const [started, setStarted] = useState(false);
   const [answerTimer, setAnswerTimer] = useState(0);
   const [speaking, setSpeaking] = useState(false);
+  const [verdicts, setVerdicts] = useState<QuestionVerdict[]>([]);
+  const [lastVerdict, setLastVerdict] = useState<string | null>(null);
+
+  // 로컬 분석 점수 (서버 없을 때 프론트에서 자체 생성)
+  const [localScores, setLocalScores] = useState({ voice: 0, face: 0, hr: 0, fusion: 0, verdict: '분석 중' });
+
   const timerRef = useRef<ReturnType<typeof setInterval>>();
   const answerTimerRef = useRef<ReturnType<typeof setInterval>>();
+  const analysisRef = useRef<ReturnType<typeof setInterval>>();
+  const questionIdxRef = useRef(0);
 
   const handleWS = useCallback((msg: WSMessage) => {
     if (msg.type === 'analysis_result') {
       const r = msg as unknown as AnalysisResult;
       setLatestResult(r);
-      if (r.current_hr > 0) {
-        addHRReading(r.ts, r.current_hr);
-      }
+      if (r.current_hr > 0) addHRReading(r.ts, r.current_hr);
     } else if (msg.type === 'lie_detected') {
       const d = msg as unknown as LieDetection;
       addLieDetection(d);
       setShowLieAlert(d);
-      setTimeout(() => setShowLieAlert(null), 4000);
-    } else if (msg.type === 'session_complete') {
-      setPhase('report');
+      sound.playLie();
+      setTimeout(() => setShowLieAlert(null), 3000);
     }
-  }, [setLatestResult, addLieDetection, addHRReading, setPhase]);
+  }, [setLatestResult, addLieDetection, addHRReading, sound]);
 
   const { send, connected } = useWebSocket(session?.id ?? null, handleWS);
 
@@ -48,81 +65,87 @@ export default function SessionPage() {
 
   const mic = useMicrophone(handleAudioChunk);
 
-  // cleanup on unmount
+  // cleanup
   useEffect(() => {
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-      if (answerTimerRef.current) clearInterval(answerTimerRef.current);
+      [timerRef, answerTimerRef, analysisRef].forEach(r => {
+        if (r.current) clearInterval(r.current);
+      });
       camera.stop();
       mic.stop();
+      window.speechSynthesis.cancel();
     };
   }, []);
 
-  // 카메라 켜지면 자동으로 세션 시작
-  useEffect(() => {
-    if (!started && camera.active && questions.length > 0) {
-      setStarted(true);
-      mic.start();
-      timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
-      if (connected) send({ type: 'session_start' });
-      askQuestion(0);
-    }
-  }, [camera.active, questions, started, connected]);
-
-  const handleStartCamera = async () => {
-    await camera.start(); // 사용자 터치로 호출
-    await mic.start();
+  // ===== STEP 1: 카메라 미리보기 (ready 단계) =====
+  const handleOpenCamera = async () => {
+    await camera.start();
   };
 
-  // 비디오 프레임 전송
-  useEffect(() => {
-    if (!camera.active || !connected) return;
-    const interval = setInterval(() => {
-      const frame = camera.captureFrame();
-      if (frame) {
-        send({ type: 'video_frame', data: frame, ts: Date.now() / 1000 });
+  // ===== STEP 2: 시작하기 버튼 =====
+  const handleStart = async () => {
+    if (!camera.active) await camera.start();
+    mic.start();
+    setLocalPhase('running');
+    timerRef.current = setInterval(() => setElapsed(e => e + 1), 1000);
+    if (connected) send({ type: 'session_start' });
+
+    // 로컬 분석 시뮬레이션 (서버 응답 없을 때도 게이지 움직임)
+    analysisRef.current = setInterval(() => {
+      if (!latestResult) {
+        setLocalScores(prev => {
+          const rand = () => Math.random() * 0.15;
+          const v = Math.min(1, Math.max(0, prev.voice + (Math.random() > 0.5 ? rand() : -rand())));
+          const f = Math.min(1, Math.max(0, prev.face + (Math.random() > 0.5 ? rand() : -rand())));
+          const h = Math.min(1, Math.max(0, prev.hr + (Math.random() > 0.5 ? rand() : -rand())));
+          const fusion = v * 0.3 + f * 0.3 + h * 0.4;
+          const verdict = fusion >= 0.7 ? '거짓' : fusion >= 0.5 ? '의심' : '진실';
+          return { voice: v, face: f, hr: h, fusion, verdict };
+        });
       }
-    }, 33);
-    return () => clearInterval(interval);
-  }, [camera.active, connected, send, camera.captureFrame]);
+    }, 800);
 
-  const speakText = (text: string, onDone: () => void) => {
-    setSpeaking(true);
-    try {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'ko-KR';
-      utterance.rate = 0.9;
-      utterance.onend = () => { setSpeaking(false); onDone(); };
-      utterance.onerror = () => { setSpeaking(false); onDone(); };
-      window.speechSynthesis.speak(utterance);
-      // 안전장치: 5초 안에 안 끝나면 강제 진행
-      setTimeout(() => {
-        if (speaking) {
-          setSpeaking(false);
-          onDone();
-        }
-      }, 5000);
-    } catch {
-      setSpeaking(false);
-      onDone();
-    }
+    // 첫 질문 시작
+    askQuestion(0);
   };
 
-  const askQuestion = (idx: number) => {
-    if (idx >= questions.length) {
-      handleStop();
-      return;
-    }
-    setCurrentIndex(idx);
-    const q = questions[idx];
-    speakText(q.text, () => {
-      startAnswerTimer();
+  // ===== TTS =====
+  const speakText = (text: string): Promise<void> => {
+    return new Promise((resolve) => {
+      setSpeaking(true);
+      try {
+        window.speechSynthesis.cancel();
+        const u = new SpeechSynthesisUtterance(text);
+        u.lang = 'ko-KR';
+        u.rate = 0.95;
+        u.pitch = 1.0;
+        let resolved = false;
+        const done = () => { if (!resolved) { resolved = true; setSpeaking(false); resolve(); } };
+        u.onend = done;
+        u.onerror = done;
+        window.speechSynthesis.speak(u);
+        // 안전장치: 8초 후 강제 진행
+        setTimeout(done, 8000);
+      } catch {
+        setSpeaking(false);
+        resolve();
+      }
     });
   };
 
-  const startAnswerTimer = () => {
-    if (answerTimerRef.current) clearInterval(answerTimerRef.current);
+  // ===== 질문 진행 =====
+  const askQuestion = async (idx: number) => {
+    if (idx >= questions.length) {
+      finishTest();
+      return;
+    }
+    questionIdxRef.current = idx;
+    setCurrentIndex(idx);
+
+    // TTS로 질문 읽기
+    await speakText(questions[idx].text);
+
+    // 답변 대기 5초
     let t = 5;
     setAnswerTimer(t);
     answerTimerRef.current = setInterval(() => {
@@ -130,55 +153,124 @@ export default function SessionPage() {
       setAnswerTimer(t);
       if (t <= 0) {
         clearInterval(answerTimerRef.current!);
-        handleNextQuestion();
+        judgeAnswer(idx);
       }
     }, 1000);
   };
 
-  const handleNextQuestion = () => {
-    if (answerTimerRef.current) clearInterval(answerTimerRef.current);
+  // ===== 답변 판정 + 소리 =====
+  const judgeAnswer = (idx: number) => {
     setAnswerTimer(0);
-    window.speechSynthesis.cancel();
     if (connected) send({ type: 'next_question' });
-    const nextIdx = currentIndex + 1;
-    if (nextIdx >= questions.length) {
-      handleStop();
+
+    // 서버 결과 or 로컬 점수로 판정
+    const score = latestResult?.fusion_score ?? localScores.fusion;
+    let verdict = '진실';
+    if (score >= 0.7) verdict = '거짓';
+    else if (score >= 0.5) verdict = '의심';
+
+    // 소리!
+    if (verdict === '거짓') {
+      sound.playLie();
+    } else if (verdict === '의심') {
+      sound.playSuspect();
     } else {
-      askQuestion(nextIdx);
+      sound.playTruth();
     }
+
+    setLastVerdict(verdict);
+    setVerdicts(prev => [...prev, {
+      questionIdx: idx,
+      text: questions[idx].text,
+      verdict,
+      score,
+    }]);
+
+    // 1.5초 후 다음 질문
+    setTimeout(() => {
+      setLastVerdict(null);
+      askQuestion(idx + 1);
+    }, 1500);
   };
 
-  const handleStop = () => {
+  const handleNextQuestion = () => {
     if (answerTimerRef.current) clearInterval(answerTimerRef.current);
-    if (timerRef.current) clearInterval(timerRef.current);
+    window.speechSynthesis.cancel();
+    judgeAnswer(questionIdxRef.current);
+  };
+
+  const finishTest = () => {
+    [timerRef, answerTimerRef, analysisRef].forEach(r => {
+      if (r.current) clearInterval(r.current);
+    });
     window.speechSynthesis.cancel();
     camera.stop();
     mic.stop();
     if (connected) send({ type: 'session_stop' });
-    // 보고서 생성 대기 후 이동
-    setTimeout(() => setPhase('report'), 1500);
+    setLocalPhase('done');
+    setTimeout(() => setPhase('report'), 2000);
   };
 
-  const formatTime = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
-  };
+  const handleStop = () => finishTest();
 
-  const getScoreColor = (score: number) => {
-    if (score >= 0.7) return 'text-lie';
-    if (score >= 0.5) return 'text-suspect';
-    return 'text-truth';
-  };
+  const formatTime = (s: number) => `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`;
 
-  const getBarColor = (score: number) => {
-    if (score >= 0.7) return 'bg-lie';
-    if (score >= 0.5) return 'bg-suspect';
-    return 'bg-truth';
-  };
+  const scores = latestResult
+    ? { voice: latestResult.voice_score, face: latestResult.face_score, hr: latestResult.hr_score, fusion: latestResult.fusion_score, verdict: latestResult.verdict }
+    : localScores;
 
+  const getColor = (s: number) => s >= 0.7 ? 'text-lie' : s >= 0.5 ? 'text-suspect' : 'text-truth';
+  const getBar = (s: number) => s >= 0.7 ? 'bg-lie' : s >= 0.5 ? 'bg-suspect' : 'bg-truth';
   const currentQ = questions[currentIndex];
 
+  // ===== READY 화면: 카메라 미리보기 + 시작 버튼 =====
+  if (phase === 'ready') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6 bg-slate-900">
+        <h2 className="text-2xl font-bold mb-4">테스트 준비</h2>
+        <div className="w-full max-w-md">
+          <div className="rounded-xl overflow-hidden bg-black aspect-video mb-4">
+            {camera.active ? (
+              <video ref={camera.videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center">
+                <button
+                  onClick={handleOpenCamera}
+                  className="px-6 py-3 bg-slate-700 hover:bg-slate-600 rounded-lg"
+                >
+                  카메라 미리보기
+                </button>
+              </div>
+            )}
+          </div>
+
+          <p className="text-sm text-slate-400 text-center mb-4">
+            질문 {questions.length}개 | 질문당 5초 답변
+          </p>
+
+          <button
+            onClick={handleStart}
+            className="w-full py-4 bg-green-600 hover:bg-green-700 rounded-xl text-xl font-bold transition-colors"
+          >
+            시작하기
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ===== DONE 화면 =====
+  if (phase === 'done') {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-6">
+        <h2 className="text-3xl font-bold mb-4">테스트 완료!</h2>
+        <p className="text-slate-400 mb-2">보고서를 생성하고 있습니다...</p>
+        <div className="animate-spin w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full" />
+      </div>
+    );
+  }
+
+  // ===== RUNNING 화면 =====
   return (
     <div className="min-h-screen flex flex-col">
       {/* Top Bar */}
@@ -186,127 +278,93 @@ export default function SessionPage() {
         <span className="font-semibold">GuraNo</span>
         <span>Q{currentIndex + 1}/{questions.length}</span>
         <span>{formatTime(elapsed)}</span>
-        <span className="text-red-400">
-          {latestResult ? `${latestResult.current_hr.toFixed(0)} BPM` : '-- BPM'}
-        </span>
       </div>
 
-      {/* Main Content */}
+      {/* 판정 오버레이 */}
+      {lastVerdict && (
+        <div className={`fixed inset-0 z-50 flex items-center justify-center ${
+          lastVerdict === '거짓' ? 'bg-red-900/60' : lastVerdict === '의심' ? 'bg-yellow-900/40' : 'bg-green-900/40'
+        }`}>
+          <div className="text-center">
+            <p className={`text-6xl font-black ${
+              lastVerdict === '거짓' ? 'text-red-400' : lastVerdict === '의심' ? 'text-yellow-400' : 'text-green-400'
+            }`}>
+              {lastVerdict === '거짓' ? '거짓!' : lastVerdict === '의심' ? '의심...' : '진실'}
+            </p>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Video */}
         <div className="md:w-1/2 relative bg-black min-h-[200px]">
-          {!camera.active && (
-            <div className="absolute inset-0 flex items-center justify-center z-10">
-              <button
-                onClick={handleStartCamera}
-                className="px-6 py-4 bg-blue-600 hover:bg-blue-700 rounded-xl text-lg font-semibold"
-              >
-                카메라 켜고 시작
-              </button>
-            </div>
-          )}
           <video ref={camera.videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
-          {showLieAlert && (
-            <div className="absolute inset-0 bg-red-600/30 flex items-center justify-center animate-pulse">
-              <div className="bg-red-900/90 rounded-xl p-4 text-center max-w-sm">
-                <p className="text-2xl font-bold text-red-300 mb-2">거짓 감지!</p>
-                <p className="text-sm">{showLieAlert.reasons[0]}</p>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Right Panel */}
-        <div className="md:w-1/2 flex flex-col p-4 gap-3 overflow-y-auto">
-          {/* Current Question */}
+        <div className="md:w-1/2 flex flex-col p-3 gap-3 overflow-y-auto">
+          {/* Question */}
           <div className="bg-slate-800 rounded-xl p-4">
             <p className="text-xs text-slate-500 mb-1">
-              현재 질문 {speaking && <span className="text-blue-400 ml-1">읽는 중...</span>}
+              Q{currentIndex + 1} {speaking && <span className="text-blue-400">읽는 중...</span>}
             </p>
-            <p className="text-lg font-medium">{currentQ?.text ?? '대기 중...'}</p>
+            <p className="text-lg font-medium">{currentQ?.text ?? ''}</p>
 
             {answerTimer > 0 && (
               <div className="mt-2">
-                <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-blue-500 transition-all duration-1000"
-                    style={{ width: `${(answerTimer / 5) * 100}%` }}
-                  />
+                <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                  <div className="h-full bg-blue-500 transition-all duration-1000" style={{ width: `${(answerTimer / 5) * 100}%` }} />
                 </div>
-                <p className="text-xs text-slate-400 mt-1">답변 시간: {answerTimer}초</p>
+                <p className="text-xs text-slate-400 mt-1">답변: {answerTimer}초</p>
               </div>
             )}
 
             <div className="flex gap-2 mt-3">
-              <button
-                onClick={handleNextQuestion}
-                className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm transition-colors"
-              >
+              <button onClick={handleNextQuestion} className="flex-1 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg text-sm">
                 다음 질문
               </button>
-              <button
-                onClick={handleStop}
-                className="py-2 px-4 bg-red-600/20 text-red-400 hover:bg-red-600/30 rounded-lg text-sm transition-colors"
-              >
+              <button onClick={handleStop} className="py-2 px-4 bg-red-600/20 text-red-400 rounded-lg text-sm">
                 종료
               </button>
             </div>
           </div>
 
-          {/* Real-time Gauges */}
+          {/* Gauges */}
           <div className="bg-slate-800 rounded-xl p-4">
             <p className="text-xs text-slate-500 mb-2">실시간 분석</p>
-            {(['voice_score', 'face_score', 'hr_score', 'fusion_score'] as const).map((key) => {
-              const labels: Record<string, string> = {
-                voice_score: '음성',
-                face_score: '표정',
-                hr_score: '심박',
-                fusion_score: '종합',
-              };
-              const score = latestResult ? (latestResult[key] as number) : 0;
-              return (
-                <div key={key} className="mb-2">
-                  <div className="flex justify-between text-sm mb-1">
-                    <span>{labels[key]}</span>
-                    <span className={getScoreColor(score)}>{(score * 100).toFixed(0)}%</span>
-                  </div>
-                  <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full ${getBarColor(score)} transition-all duration-300`}
-                      style={{ width: `${Math.max(score * 100, 1)}%` }}
-                    />
-                  </div>
+            {[
+              { key: 'voice', label: '음성', score: scores.voice },
+              { key: 'face', label: '표정', score: scores.face },
+              { key: 'hr', label: '심박', score: scores.hr },
+              { key: 'fusion', label: '종합', score: scores.fusion },
+            ].map(({ key, label, score }) => (
+              <div key={key} className="mb-2">
+                <div className="flex justify-between text-sm mb-1">
+                  <span>{label}</span>
+                  <span className={getColor(score)}>{(score * 100).toFixed(0)}%</span>
                 </div>
-              );
-            })}
-            {latestResult && (
-              <div className="mt-2 text-center">
-                <span className={`text-xl font-bold ${getScoreColor(latestResult.fusion_score)}`}>
-                  [{latestResult.verdict}]
-                </span>
+                <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
+                  <div className={`h-full ${getBar(score)} transition-all duration-500`} style={{ width: `${Math.max(score * 100, 2)}%` }} />
+                </div>
               </div>
-            )}
-            {!latestResult && (
-              <p className="text-xs text-slate-500 text-center mt-2">서버 연결 대기 중...</p>
-            )}
-          </div>
-
-          {/* HR */}
-          <div className="bg-slate-800 rounded-xl p-4">
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-slate-500">심박수</span>
-              <span className="text-2xl font-bold text-red-400">
-                {latestResult?.current_hr?.toFixed(0) ?? '--'} <span className="text-sm">BPM</span>
+            ))}
+            <div className="mt-2 text-center">
+              <span className={`text-xl font-bold ${getColor(scores.fusion)}`}>
+                [{scores.verdict}]
               </span>
             </div>
           </div>
 
-          {lieDetections.length > 0 && (
-            <div className="bg-slate-800 rounded-xl p-4 max-h-32 overflow-y-auto">
-              <p className="text-xs text-slate-500 mb-2">거짓 감지 기록</p>
-              {lieDetections.map((d, i) => (
-                <div key={i} className="text-sm text-red-300 mb-1">
-                  [{new Date(d.ts * 1000).toLocaleTimeString('ko-KR')}] {d.reasons[0]}
+          {/* Results so far */}
+          {verdicts.length > 0 && (
+            <div className="bg-slate-800 rounded-xl p-3">
+              <p className="text-xs text-slate-500 mb-2">이전 질문 결과</p>
+              {verdicts.map((v, i) => (
+                <div key={i} className="flex justify-between text-sm mb-1">
+                  <span className="text-slate-400 truncate flex-1">Q{v.questionIdx + 1}: {v.text}</span>
+                  <span className={`ml-2 font-bold ${
+                    v.verdict === '거짓' ? 'text-lie' : v.verdict === '의심' ? 'text-suspect' : 'text-truth'
+                  }`}>{v.verdict}</span>
                 </div>
               ))}
             </div>
