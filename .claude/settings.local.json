@@ -35,7 +35,11 @@
       "Bash(pkill -f \"uvicorn app.main\")",
       "Bash(tasklist)",
       "Bash(taskkill:*)",
-      "Bash(find /c/Users/user/Desktop/claude/GuraNo/backend -name \"__pycache__\" -type d -exec rm -rf {} +)"
+      "Bash(find /c/Users/user/Desktop/claude/GuraNo/backend -name \"__pycache__\" -type d -exec rm -rf {} +)",
+      "Bash(git push:*)",
+      "Bash(disown)",
+      "Bash(ngrok --version)",
+      "Bash(winget list:*)"
     ]
   }
 }

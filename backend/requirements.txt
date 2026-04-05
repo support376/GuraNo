@@ -9,40 +9,16 @@ sqlalchemy==2.0.35
 alembic==1.13.0
 aiosqlite==0.20.0
 
-# Audio analysis
-opensmile==2.5.0
-parselmouth==0.4.4
-librosa==0.10.2
-soundfile==0.12.1
-
-# Speaker diarization
-pyannote.audio==3.3.0
-
-# Noise filtering
-deepfilterlib==0.5.6
-deepfilternet==0.5.6
-
-# Face analysis
-mediapipe==0.10.14
-py-feat==0.6.1
-opencv-python-headless==4.10.0.84
-
-# STT
-openai-whisper==20240930
-
-# ML
-xgboost==2.1.0
-scikit-learn==1.5.0
+# Analysis (lightweight)
 numpy==1.26.4
 scipy==1.14.0
-pandas==2.2.0
+opencv-python-headless==4.10.0.84
 
-# TTS
-google-cloud-texttospeech==2.17.0
+# ML
+scikit-learn==1.5.0
 
 # Report
 matplotlib==3.9.0
-weasyprint==62.3
 jinja2==3.1.4
 
 # Utils

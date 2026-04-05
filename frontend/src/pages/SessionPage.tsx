@@ -93,14 +93,14 @@ export default function SessionPage() {
     const q = questions[idx];
     // TTS로 질문 읽기
     tts.speak(q.text, () => {
-      // 질문 읽기 끝나면 답변 대기 타이머 시작 (12초)
+      // 질문 읽기 끝나면 답변 대기 타이머 시작 (5초)
       startAnswerTimer();
     });
   };
 
   const startAnswerTimer = () => {
     if (answerTimerRef.current) clearInterval(answerTimerRef.current);
-    let t = 12;
+    let t = 5;
     setAnswerTimer(t);
     answerTimerRef.current = setInterval(() => {
       t -= 1;
@@ -196,7 +196,7 @@ export default function SessionPage() {
                 <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
                   <div
                     className="h-full bg-blue-500 transition-all duration-1000"
-                    style={{ width: `${(answerTimer / 12) * 100}%` }}
+                    style={{ width: `${(answerTimer / 5) * 100}%` }}
                   />
                 </div>
                 <p className="text-xs text-slate-400 mt-1">답변 시간: {answerTimer}초</p>

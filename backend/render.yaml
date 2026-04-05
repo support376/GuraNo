@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: gurano-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: DATABASE_URL
+        value: sqlite+aiosqlite:///./gurano.db
+      - key: DEBUG
+        value: false
+      - key: CORS_ORIGINS
+        value: https://frontend-dream-frame.vercel.app,https://gurano-frontend.vercel.app
+      - key: CAPTURE_DIR
+        value: /tmp/captures
