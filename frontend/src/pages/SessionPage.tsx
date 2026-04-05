@@ -48,11 +48,8 @@ export default function SessionPage() {
 
   const mic = useMicrophone(handleAudioChunk);
 
-  // 카메라 + 마이크 시작
+  // cleanup on unmount
   useEffect(() => {
-    camera.start();
-    mic.start();
-    timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
       if (answerTimerRef.current) clearInterval(answerTimerRef.current);
@@ -61,14 +58,21 @@ export default function SessionPage() {
     };
   }, []);
 
-  // 세션 시작 + 첫 질문
+  // 카메라 켜지면 자동으로 세션 시작
   useEffect(() => {
     if (!started && camera.active && questions.length > 0) {
       setStarted(true);
+      mic.start();
+      timerRef.current = setInterval(() => setElapsed((e) => e + 1), 1000);
       if (connected) send({ type: 'session_start' });
       askQuestion(0);
     }
   }, [camera.active, questions, started, connected]);
+
+  const handleStartCamera = async () => {
+    await camera.start(); // 사용자 터치로 호출
+    await mic.start();
+  };
 
   // 비디오 프레임 전송
   useEffect(() => {
@@ -191,6 +195,16 @@ export default function SessionPage() {
       <div className="flex-1 flex flex-col md:flex-row overflow-hidden">
         {/* Video */}
         <div className="md:w-1/2 relative bg-black min-h-[200px]">
+          {!camera.active && (
+            <div className="absolute inset-0 flex items-center justify-center z-10">
+              <button
+                onClick={handleStartCamera}
+                className="px-6 py-4 bg-blue-600 hover:bg-blue-700 rounded-xl text-lg font-semibold"
+              >
+                카메라 켜고 시작
+              </button>
+            </div>
+          )}
           <video ref={camera.videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
           {showLieAlert && (
             <div className="absolute inset-0 bg-red-600/30 flex items-center justify-center animate-pulse">

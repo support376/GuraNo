@@ -111,9 +111,7 @@ export default function SetupPage() {
             <span className="text-sm text-slate-400">심박수 소스</span>
             <div className="mt-2 space-y-1">
               {([
-                ['apple_watch', 'Apple Watch (권장)'],
-                ['ble', 'BLE 심박 밴드'],
-                ['rppg', '웹캠 rPPG (대안)'],
+                ['rppg', '웹캠으로 심박 추정 (기본)'],
                 ['none', '사용 안 함'],
               ] as [HRSource, string][]).map(([value, label]) => (
                 <label key={value} className="flex items-center gap-2 text-sm cursor-pointer">
@@ -127,6 +125,9 @@ export default function SetupPage() {
                   {label}
                 </label>
               ))}
+              <p className="text-xs text-slate-500 mt-2">
+                * Apple Watch 심박수는 전용 앱 설치 필요 (Xcode 빌드)
+              </p>
             </div>
           </div>
         </div>

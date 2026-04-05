@@ -7,36 +7,19 @@ import type { WSMessage } from '@/types/websocket';
 export default function CalibrationPage() {
   const { session, setPhase } = useSessionStore();
   const camera = useCamera();
-  const [status, setStatus] = useState('카메라를 준비하고 있습니다...');
   const [baselineReady, setBaselineReady] = useState(false);
-  const [countdown, setCountdown] = useState(10); // 10초로 줄임
+  const [countdown, setCountdown] = useState(10);
   const [calibrating, setCalibrating] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval>>();
 
   const handleWS = useCallback((msg: WSMessage) => {
-    if (msg.type === 'status') {
-      setStatus(msg.message as string);
-    } else if (msg.type === 'baseline_ready') {
+    if (msg.type === 'baseline_ready') {
       setBaselineReady(true);
       setCalibrating(false);
-      setStatus('기준선 수립 완료!');
     }
   }, []);
 
   const { send, connected } = useWebSocket(session?.id ?? null, handleWS);
-
-  // 카메라 바로 시작
-  useEffect(() => {
-    camera.start();
-    return () => camera.stop();
-  }, []);
-
-  // 카메라 켜지면 상태 업데이트
-  useEffect(() => {
-    if (camera.active) {
-      setStatus('카메라 연결됨. 기준선 수집을 시작하세요.');
-    }
-  }, [camera.active]);
 
   // 비디오 프레임 전송
   useEffect(() => {
@@ -46,16 +29,15 @@ export default function CalibrationPage() {
       if (frame) {
         send({ type: 'video_frame', data: frame, ts: Date.now() / 1000 });
       }
-    }, 200); // 5fps during calibration
+    }, 200);
     return () => clearInterval(interval);
   }, [camera.active, connected, send, camera.captureFrame]);
 
-  const startCalibration = () => {
+  // 카메라 켜기 + 기준선 동시에 시작 (버튼 터치로)
+  const startCalibration = async () => {
+    await camera.start(); // 사용자 터치 이벤트 안에서 호출
     setCalibrating(true);
-    setStatus('기준선 수집 중... 편안하게 앉아 계세요.');
-    if (connected) {
-      send({ type: 'calibration_start' });
-    }
+    if (connected) send({ type: 'calibration_start' });
 
     let t = 10;
     setCountdown(t);
@@ -64,24 +46,21 @@ export default function CalibrationPage() {
       setCountdown(t);
       if (t <= 0) {
         clearInterval(timerRef.current);
-        if (connected) {
-          send({ type: 'calibration_done' });
-        }
-        // 서버 응답 없어도 자동 완료
+        if (connected) send({ type: 'calibration_done' });
         setBaselineReady(true);
         setCalibrating(false);
-        setStatus('기준선 수립 완료!');
       }
     }, 1000);
   };
 
   const proceedToSession = () => {
     if (timerRef.current) clearInterval(timerRef.current);
+    // 카메라는 끄지 않음 - SessionPage에서 새로 시작
     camera.stop();
     setPhase('session');
   };
 
-  const skipCalibration = () => {
+  const skipCalibration = async () => {
     if (timerRef.current) clearInterval(timerRef.current);
     camera.stop();
     setPhase('session');
@@ -95,10 +74,16 @@ export default function CalibrationPage() {
         <div className="bg-slate-800 rounded-xl p-6 mb-6">
           {/* Camera Preview */}
           <div className="rounded-lg overflow-hidden bg-black aspect-video mb-4">
-            <video ref={camera.videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+            {camera.active ? (
+              <video ref={camera.videoRef} autoPlay muted playsInline className="w-full h-full object-cover" />
+            ) : (
+              <div className="w-full h-full flex items-center justify-center text-slate-500">
+                카메라 대기 중
+              </div>
+            )}
           </div>
 
-          {/* Connection Status */}
+          {/* Status */}
           <div className="flex items-center justify-center gap-2 mb-3">
             <div className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500' : 'bg-yellow-500'}`} />
             <span className="text-xs text-slate-400">
@@ -106,9 +91,17 @@ export default function CalibrationPage() {
             </span>
           </div>
 
-          <p className="text-slate-300 mb-4">{status}</p>
+          <p className="text-slate-300 mb-4">
+            {calibrating ? '기준선 수집 중... 편안하게 앉아 계세요.' :
+             baselineReady ? '기준선 수립 완료!' :
+             '아래 버튼을 눌러 카메라를 켜고 기준선을 수집합니다.'}
+          </p>
 
-          {/* Calibrating - show progress */}
+          {camera.error && (
+            <p className="text-red-400 text-sm mb-3">{camera.error}</p>
+          )}
+
+          {/* Calibrating progress */}
           {calibrating && (
             <div className="mb-4">
               <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
@@ -121,29 +114,28 @@ export default function CalibrationPage() {
             </div>
           )}
 
-          {/* Start button */}
+          {/* Start button - 카메라 + 기준선 동시 시작 */}
           {!baselineReady && !calibrating && (
             <button
               onClick={startCalibration}
-              className="w-full py-3 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition-colors"
+              className="w-full py-4 bg-blue-600 hover:bg-blue-700 rounded-lg font-semibold transition-colors text-lg"
             >
-              기준선 수집 시작 (10초)
+              카메라 켜고 기준선 수집 (10초)
             </button>
           )}
 
-          {/* Done - proceed */}
+          {/* Done */}
           {baselineReady && (
             <button
               onClick={proceedToSession}
-              className="w-full py-3 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition-colors"
+              className="w-full py-4 bg-green-600 hover:bg-green-700 rounded-lg font-semibold transition-colors text-lg"
             >
               테스트 시작
             </button>
           )}
         </div>
 
-        {/* Skip button always visible */}
-        {!baselineReady && (
+        {!baselineReady && !calibrating && (
           <button
             onClick={skipCalibration}
             className="text-slate-500 hover:text-slate-300 text-sm"
